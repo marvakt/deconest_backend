@@ -1,14 +1,22 @@
-from rest_framework import viewsets, status, permissions
+from rest_framework import viewsets, status, permissions, mixins
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
-from .models import User, Product, Wishlist, CartItem, Order
-from .serializers import UserSerializer, ProductSerializer, WishlistSerializer, CartItemSerializer, OrderSerializer
+from django.db.models import Q
 
-# -------------------------------------
-# JWT HELPER FUNCTION
-# -------------------------------------
+from .models import User, Profile, Product, Wishlist, CartItem, Order
+from .serializers import (
+    UserSerializer,
+    ProductSerializer,
+    WishlistSerializer,
+    CartItemSerializer,
+    OrderSerializer,
+)
+
+# -----------------------------
+# JWT TOKEN HELPER
+# -----------------------------
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
     return {
@@ -16,19 +24,23 @@ def get_tokens_for_user(user):
         'access': str(refresh.access_token),
     }
 
-# -------------------------------------
-# AUTHENTICATION VIEWS
-# -------------------------------------
+# -----------------------------
+# REGISTER
+# -----------------------------
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def register(request):
     serializer = UserSerializer(data=request.data)
     if serializer.is_valid():
-        serializer.save()
+        user = serializer.save()
+        # Optional: create profile immediately at registration
+        Profile.objects.get_or_create(user=user)
         return Response({'message': 'User registered successfully'}, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
+# -----------------------------
+# LOGIN
+# -----------------------------
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def login_view(request):
@@ -39,10 +51,14 @@ def login_view(request):
         return Response({'error': 'Username and password are required'}, status=status.HTTP_400_BAD_REQUEST)
 
     user = authenticate(username=username, password=password)
+
     if user:
         if getattr(user, 'is_blocked', False):
             return Response({'error': 'User is blocked'}, status=status.HTTP_403_FORBIDDEN)
-        
+
+        # Auto-create profile if missing
+        Profile.objects.get_or_create(user=user)
+
         tokens = get_tokens_for_user(user)
         user_data = UserSerializer(user).data
         return Response({
@@ -53,7 +69,9 @@ def login_view(request):
 
     return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
-
+# -----------------------------
+# LOGOUT
+# -----------------------------
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def logout_view(request):
@@ -65,20 +83,31 @@ def logout_view(request):
     except Exception:
         return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
 
-# -------------------------------------
-# CRUD VIEWSETS
-# -------------------------------------
-
-# Only admin can manage users
+# -----------------------------
+# USER VIEWSET (Admin Only)
+# -----------------------------
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAdminUser]
 
-# Anyone can view products, but only admin can create/update/delete
+# -----------------------------
+# PRODUCT VIEWSET
+# -----------------------------
 class ProductViewSet(viewsets.ModelViewSet):
-    queryset = Product.objects.filter(is_archived=False)
+    queryset = Product.objects.all()
     serializer_class = ProductSerializer
+
+    def get_queryset(self):
+        queryset = Product.objects.filter(is_archived=False)
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(title__icontains=search) |
+                Q(description__icontains=search) |
+                Q(room__icontains=search)
+            )
+        return queryset
 
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
@@ -87,20 +116,47 @@ class ProductViewSet(viewsets.ModelViewSet):
             permission_classes = [permissions.IsAdminUser]
         return [perm() for perm in permission_classes]
 
-# Only authenticated users can access wishlist
+# -----------------------------
+# WISHLIST VIEWSET
+# -----------------------------
 class WishlistViewSet(viewsets.ModelViewSet):
-    queryset = Wishlist.objects.all()
     serializer_class = WishlistSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-# Only authenticated users can access cart
+    def get_queryset(self):
+        return Wishlist.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+# -----------------------------
+# CART VIEWSET
+# -----------------------------
 class CartItemViewSet(viewsets.ModelViewSet):
-    queryset = CartItem.objects.all()
     serializer_class = CartItemSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-# Only authenticated users can access orders
-class OrderViewSet(viewsets.ModelViewSet):
-    queryset = Order.objects.all()
+    def get_queryset(self):
+        return CartItem.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+# -----------------------------
+# ORDER VIEWSET
+# -----------------------------
+class OrderViewSet(mixins.ListModelMixin,
+                   mixins.CreateModelMixin,
+                   mixins.RetrieveModelMixin,
+                   viewsets.GenericViewSet):
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff or getattr(user, 'role', None) == 'admin':
+            return Order.objects.all()
+        return Order.objects.filter(user=user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)

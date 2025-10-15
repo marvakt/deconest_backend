@@ -1,26 +1,44 @@
 from rest_framework import serializers
 from .models import User, Product, Wishlist, CartItem, Order, OrderItem
 
-# -------------------------
-# 1️⃣ USER SERIALIZER
-# -------------------------
+# -------------------------------------------------------------------
+# 🧩 BASE MIXINS / ABSTRACT SERIALIZERS
+# -------------------------------------------------------------------
+class TimestampSerializerMixin(serializers.ModelSerializer):
+    """For models with created/updated timestamps."""
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+    class Meta:
+        abstract = True
+
+
+class UserReferenceMixin(serializers.ModelSerializer):
+    """Automatically assign logged-in user on create."""
+    def create(self, validated_data):
+        user = self.context['request'].user
+        validated_data['user'] = user
+        return super().create(validated_data)
+
+
+# -------------------------------------------------------------------
+# 👤 USER SERIALIZER
+# -------------------------------------------------------------------
 class UserSerializer(serializers.ModelSerializer):
-    # Include password field for write-only access
     password = serializers.CharField(write_only=True, required=True)
 
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'role', 'is_blocked', 'password']
+        extra_kwargs = {'password': {'write_only': True}}
 
-    # Override create to hash password properly
     def create(self, validated_data):
         password = validated_data.pop('password')
         user = User(**validated_data)
-        user.set_password(password)  # ✅ hash the password
+        user.set_password(password)
         user.save()
         return user
 
-    # Optional: override update if you allow password change
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
         for attr, value in validated_data.items():
@@ -31,46 +49,65 @@ class UserSerializer(serializers.ModelSerializer):
         return instance
 
 
-# -------------------------
-# 2️⃣ PRODUCT SERIALIZER
-# -------------------------
-class ProductSerializer(serializers.ModelSerializer):
+# -------------------------------------------------------------------
+# 🛍 PRODUCT SERIALIZER
+# -------------------------------------------------------------------
+class ProductSerializer(TimestampSerializerMixin):
     class Meta:
         model = Product
         fields = '__all__'
 
 
-# -------------------------
-# 3️⃣ WISHLIST SERIALIZER
-# -------------------------
-class WishlistSerializer(serializers.ModelSerializer):
+# -------------------------------------------------------------------
+# 💖 WISHLIST SERIALIZER
+# -------------------------------------------------------------------
+class WishlistSerializer(UserReferenceMixin, serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
     product_id = serializers.PrimaryKeyRelatedField(
-        queryset=Product.objects.all(), source='product', write_only=True
+        queryset=Product.objects.all(),
+        source='product',
+        write_only=True
     )
 
     class Meta:
         model = Wishlist
         fields = ['id', 'user', 'product', 'product_id']
+        read_only_fields = ['user']
+
+    def validate(self, data):
+        """Prevent duplicate wishlist entries."""
+        user = self.context['request'].user
+        product = data['product']
+        if Wishlist.objects.filter(user=user, product=product).exists():
+            raise serializers.ValidationError("This product is already in your wishlist.")
+        return data
 
 
-# -------------------------
-# 4️⃣ CART SERIALIZER
-# -------------------------
-class CartItemSerializer(serializers.ModelSerializer):
+# -------------------------------------------------------------------
+# 🛒 CART SERIALIZER
+# -------------------------------------------------------------------
+class CartItemSerializer(UserReferenceMixin, serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
     product_id = serializers.PrimaryKeyRelatedField(
-        queryset=Product.objects.all(), source='product', write_only=True
+        queryset=Product.objects.all(),
+        source='product',
+        write_only=True
     )
 
     class Meta:
         model = CartItem
         fields = ['id', 'user', 'product', 'product_id', 'quantity']
+        read_only_fields = ['user']
+
+    def validate_quantity(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Quantity must be at least 1.")
+        return value
 
 
-# -------------------------
-# 5️⃣ ORDER SERIALIZER
-# -------------------------
+# -------------------------------------------------------------------
+# 📦 ORDER SERIALIZERS
+# -------------------------------------------------------------------
 class OrderItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
 
@@ -79,9 +116,10 @@ class OrderItemSerializer(serializers.ModelSerializer):
         fields = ['id', 'product', 'quantity']
 
 
-class OrderSerializer(serializers.ModelSerializer):
+class OrderSerializer(UserReferenceMixin, serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = Order
         fields = ['id', 'user', 'total', 'address', 'payment_method', 'status', 'date', 'items']
+        read_only_fields = ['user', 'status', 'date']
