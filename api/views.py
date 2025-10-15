@@ -1,11 +1,11 @@
-from rest_framework import viewsets, status, permissions, mixins
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework import viewsets, status, permissions, mixins, serializers
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.db.models import Q
 
-from .models import User, Profile, Product, Wishlist, CartItem, Order
+from .models import User, Profile, Product, Wishlist, CartItem, Order, OrderItem
 from .serializers import (
     UserSerializer,
     ProductSerializer,
@@ -25,63 +25,63 @@ def get_tokens_for_user(user):
     }
 
 # -----------------------------
-# REGISTER
+# REGISTER CBV
 # -----------------------------
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])
-def register(request):
-    serializer = UserSerializer(data=request.data)
-    if serializer.is_valid():
-        user = serializer.save()
-        # Optional: create profile immediately at registration
-        Profile.objects.get_or_create(user=user)
-        return Response({'message': 'User registered successfully'}, status=status.HTTP_201_CREATED)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+class RegisterView(APIView):
+    permission_classes = [permissions.AllowAny]
 
-# -----------------------------
-# LOGIN
-# -----------------------------
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])
-def login_view(request):
-    username = request.data.get('username')
-    password = request.data.get('password')
-
-    if not username or not password:
-        return Response({'error': 'Username and password are required'}, status=status.HTTP_400_BAD_REQUEST)
-
-    user = authenticate(username=username, password=password)
-
-    if user:
-        if getattr(user, 'is_blocked', False):
-            return Response({'error': 'User is blocked'}, status=status.HTTP_403_FORBIDDEN)
-
-        # Auto-create profile if missing
-        Profile.objects.get_or_create(user=user)
-
-        tokens = get_tokens_for_user(user)
-        user_data = UserSerializer(user).data
-        return Response({
-            'message': 'Login successful',
-            'tokens': tokens,
-            'user': user_data
-        }, status=status.HTTP_200_OK)
-
-    return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+    def post(self, request):
+        serializer = UserSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            Profile.objects.get_or_create(user=user)
+            return Response({'message': 'User registered successfully'}, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # -----------------------------
-# LOGOUT
+# LOGIN CBV
 # -----------------------------
-@api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
-def logout_view(request):
-    try:
-        refresh_token = request.data["refresh"]
-        token = RefreshToken(refresh_token)
-        token.blacklist()
-        return Response({'message': 'Logged out successfully'}, status=status.HTTP_200_OK)
-    except Exception:
-        return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
+class LoginView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        username = request.data.get('username')
+        password = request.data.get('password')
+
+        if not username or not password:
+            return Response({'error': 'Username and password are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = authenticate(username=username, password=password)
+        if user:
+            if getattr(user, 'is_blocked', False):
+                return Response({'error': 'User is blocked'}, status=status.HTTP_403_FORBIDDEN)
+
+            Profile.objects.get_or_create(user=user)
+
+            tokens = get_tokens_for_user(user)
+            user_data = UserSerializer(user).data
+            return Response({
+                'message': 'Login successful',
+                'tokens': tokens,
+                'user': user_data
+            }, status=status.HTTP_200_OK)
+
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+
+# -----------------------------
+# LOGOUT CBV
+# -----------------------------
+class LogoutView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            refresh_token = request.data["refresh"]
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            return Response({'message': 'Logged out successfully'}, status=status.HTTP_200_OK)
+        except Exception:
+            return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
 
 # -----------------------------
 # USER VIEWSET (Admin Only)
@@ -143,7 +143,7 @@ class CartItemViewSet(viewsets.ModelViewSet):
         serializer.save(user=self.request.user)
 
 # -----------------------------
-# ORDER VIEWSET
+# ORDER VIEWSET (Auto-create items from cart)
 # -----------------------------
 class OrderViewSet(mixins.ListModelMixin,
                    mixins.CreateModelMixin,
@@ -159,4 +159,18 @@ class OrderViewSet(mixins.ListModelMixin,
         return Order.objects.filter(user=user)
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        cart_items = CartItem.objects.filter(user=self.request.user)
+        if not cart_items.exists():
+            raise serializers.ValidationError("Cart is empty.")
+
+        total = sum(item.product.price * item.quantity for item in cart_items)
+        order = serializer.save(user=self.request.user, total=total)
+
+        for item in cart_items:
+            OrderItem.objects.create(
+                order=order,
+                product=item.product,
+                quantity=item.quantity
+            )
+
+        cart_items.delete()
