@@ -1,9 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 
-# ----------------------------------
-# 1️⃣ USER MODEL
-# ----------------------------------
+
 class User(AbstractUser):
     ROLE_CHOICES = (
         ('admin', 'Admin'),
@@ -11,14 +9,15 @@ class User(AbstractUser):
     )
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='user')
     is_blocked = models.BooleanField(default=False) 
+    email=models.EmailField(max_length=50,unique=True)
 
     def __str__(self):
         return self.username
 
 
-# ----------------------------------
-# 2️⃣ PROFILE MODEL
-# ----------------------------------
+
+
+
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     bio = models.TextField(blank=True, null=True)
@@ -30,9 +29,9 @@ class Profile(models.Model):
         return f"{self.user.username}'s profile"
 
 
-# ----------------------------------
-# 3️⃣ PRODUCT MODEL
-# ----------------------------------
+
+
+
 class Product(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField()
@@ -47,9 +46,8 @@ class Product(models.Model):
         return self.title
 
 
-# ----------------------------------
-# 4️⃣ WISHLIST MODEL
-# ----------------------------------
+
+
 class Wishlist(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='wishlist')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='wishlist_items')
@@ -61,9 +59,8 @@ class Wishlist(models.Model):
         return f"{self.user.username} - {self.product.title}"
 
 
-# ----------------------------------
-# 5️⃣ CART MODEL
-# ----------------------------------
+
+
 class CartItem(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='cart')
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
@@ -76,9 +73,8 @@ class CartItem(models.Model):
         return f"{self.user.username} - {self.product.title}"
 
 
-# ----------------------------------
-# 6️⃣ ORDER + ORDER ITEM MODELS
-# ----------------------------------
+
+
 class Order(models.Model):
     STATUS_CHOICES = (
         ('Pending', 'Pending'),
@@ -87,11 +83,17 @@ class Order(models.Model):
     )
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='orders')
-    total = models.DecimalField(max_digits=10, decimal_places=2)
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # default 0
     address = models.CharField(max_length=255)
     payment_method = models.CharField(max_length=20, default='cod')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
     date = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        # calculate total if order has items
+        if self.pk:  # order already exists
+            self.total = sum(item.subtotal() for item in self.items.all())
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Order #{self.id} - {self.user.username}"

@@ -14,9 +14,7 @@ from .serializers import (
     OrderSerializer,
 )
 
-# -----------------------------
-# JWT TOKEN HELPER
-# -----------------------------
+
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
     return {
@@ -24,9 +22,7 @@ def get_tokens_for_user(user):
         'access': str(refresh.access_token),
     }
 
-# -----------------------------
-# REGISTER CBV
-# -----------------------------
+
 class RegisterView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -38,9 +34,7 @@ class RegisterView(APIView):
             return Response({'message': 'User registered successfully'}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# -----------------------------
-# LOGIN CBV
-# -----------------------------
+
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -68,9 +62,6 @@ class LoginView(APIView):
 
         return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
-# -----------------------------
-# LOGOUT CBV
-# -----------------------------
 class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -83,17 +74,12 @@ class LogoutView(APIView):
         except Exception:
             return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
 
-# -----------------------------
-# USER VIEWSET (Admin Only)
-# -----------------------------
+
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAdminUser]
 
-# -----------------------------
-# PRODUCT VIEWSET
-# -----------------------------
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
@@ -116,9 +102,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             permission_classes = [permissions.IsAdminUser]
         return [perm() for perm in permission_classes]
 
-# -----------------------------
-# WISHLIST VIEWSET
-# -----------------------------
+
 class WishlistViewSet(viewsets.ModelViewSet):
     serializer_class = WishlistSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -129,9 +113,7 @@ class WishlistViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-# -----------------------------
-# CART VIEWSET
-# -----------------------------
+
 class CartItemViewSet(viewsets.ModelViewSet):
     serializer_class = CartItemSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -142,9 +124,6 @@ class CartItemViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-# -----------------------------
-# ORDER VIEWSET (Auto-create items from cart)
-# -----------------------------
 class OrderViewSet(mixins.ListModelMixin,
                    mixins.CreateModelMixin,
                    mixins.RetrieveModelMixin,

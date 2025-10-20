@@ -1,9 +1,9 @@
 from rest_framework import serializers
 from .models import User, Product, Wishlist, CartItem, Order, OrderItem
 
-# -------------------------------------------------------------------
-# 🧩 BASE MIXINS / ABSTRACT SERIALIZERS
-# -------------------------------------------------------------------
+
+
+
 class TimestampSerializerMixin(serializers.ModelSerializer):
     """For models with created/updated timestamps."""
     created_at = serializers.DateTimeField(read_only=True)
@@ -21,9 +21,9 @@ class UserReferenceMixin(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
-# -------------------------------------------------------------------
-# 👤 USER SERIALIZER
-# -------------------------------------------------------------------
+
+
+
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
 
@@ -49,18 +49,16 @@ class UserSerializer(serializers.ModelSerializer):
         return instance
 
 
-# -------------------------------------------------------------------
-# 🛍 PRODUCT SERIALIZER
-# -------------------------------------------------------------------
+
+
 class ProductSerializer(TimestampSerializerMixin):
     class Meta:
         model = Product
         fields = '__all__'
 
 
-# -------------------------------------------------------------------
-# 💖 WISHLIST SERIALIZER
-# -------------------------------------------------------------------
+
+
 class WishlistSerializer(UserReferenceMixin, serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
     product_id = serializers.PrimaryKeyRelatedField(
@@ -83,9 +81,7 @@ class WishlistSerializer(UserReferenceMixin, serializers.ModelSerializer):
         return data
 
 
-# -------------------------------------------------------------------
-# 🛒 CART SERIALIZER
-# -------------------------------------------------------------------
+
 class CartItemSerializer(UserReferenceMixin, serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
     product_id = serializers.PrimaryKeyRelatedField(
@@ -105,9 +101,6 @@ class CartItemSerializer(UserReferenceMixin, serializers.ModelSerializer):
         return value
 
 
-# -------------------------------------------------------------------
-# 📦 ORDER SERIALIZERS
-# -------------------------------------------------------------------
 class OrderItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
 
@@ -116,10 +109,13 @@ class OrderItemSerializer(serializers.ModelSerializer):
         fields = ['id', 'product', 'quantity']
 
 
+
 class OrderSerializer(UserReferenceMixin, serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
+    total = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)  # read-only
 
     class Meta:
         model = Order
         fields = ['id', 'user', 'total', 'address', 'payment_method', 'status', 'date', 'items']
-        read_only_fields = ['user', 'status', 'date']
+        read_only_fields = ['user', 'status', 'date', 'total']
+
