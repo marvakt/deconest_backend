@@ -90,8 +90,8 @@ class Order(models.Model):
     date = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
-        # calculate total if order has items
-        if self.pk:  # order already exists
+        
+        if self.pk:  
             self.total = sum(item.subtotal() for item in self.items.all())
         super().save(*args, **kwargs)
 
